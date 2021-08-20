@@ -2,7 +2,9 @@
 #include <thread>
 #include <memory>
 #include <mutex>
+#include <future>
 #include <vector>
+#include <chrono>
 // home work //------------------------------------------------------------------------------------------------------
 void in_str(int &i){
     std::string a;
@@ -44,53 +46,76 @@ void run_home_work(){
  * Первый поток читает данные и удаляет ячейки
  * Второй поток пишет данные
  */
-std::shared_ptr<std::vector<int>> show(std::shared_ptr<std::vector<int>> vec){
-    int size = static_cast<int>(vec->size());
+void show(std::vector<int> vec){
+    int size = static_cast<int>(vec.size());
     std::cout << "-- Vector size: " << size << " vector data: ";
     for(int i = 0; i < size; i++){
-        std::cout << vec->at(i) << " | ";
+        std::cout << vec.at(i) << " | ";
     }
     std::cout << std::endl;
-    return std::move(vec);
 }
 
-std::shared_ptr<std::vector<int>> show_and_del(std::shared_ptr<std::vector<int>> vec,
+void  show_and_del(std::vector<int> &vec,
                   std::mutex &mtx){
-    mtx.lock();
-    if(!(vec->empty())){
-        try{
-            vec = show(std::move(vec));
-            vec->erase(vec->begin(), vec->end());
-        }
-        catch (const char* exception){
-            std::cout << exception << std::endl;
-        }
+    std::lock_guard<std::mutex> lock(mtx);
+    if(!(vec.empty())){
+            show(vec);
+            vec.erase(vec.begin(), vec.end());
     }
-    mtx.unlock();
-    return std::move(vec);
 }
 
-std::shared_ptr<std::vector<int>> add_ell(std::shared_ptr<std::vector<int>> vec,
+void add_ell(std::vector<int> &vec,
              int n, std::mutex &mtx){
-    mtx.lock();
-    vec->push_back(n);
-    mtx.unlock();
-    return std::move(vec);
+    std::lock_guard<std::mutex> lock(mtx);
+    vec.push_back(n);
 }
 
 void run_vector(){
-    auto vector = std::make_shared<std::vector<int>>();
+    std::vector<int> vector;
     std::mutex mtx;
     for (int i = 0; i <= 1000; i++){
-        std::thread th_1([&vector, &i, &mtx] () { vector = add_ell(std::move(vector), i, std::ref(mtx)); } );
-        std::thread th_2([&vector, &mtx] () { vector = show_and_del(std::move(vector), std::ref(mtx)); } );
+        std::thread th_1(add_ell, std::ref(vector), i, std::ref(mtx));
+        std::thread th_2(show_and_del, std::ref(vector), std::ref(mtx));
         th_1.join();
         th_2.join();
     }
 }
+/* Доступ к вектору из двух потоков и выставление приоритетности операций
+ * 1. добавление элемента
+ * 2. если добавлен элемент и вектор не занят вывод и удаление данных
+ */
+void add_ell_(std::vector<int>* vec, int i, std::promise<bool> &pr){
+    vec->resize(vec->size() + 1);
+    vec->at(vec->size() - 1) = i;
+    pr.set_value(true);
+}
+void show_and_del_(std::vector<int>* vec, std::promise<bool> &pr){
+    std::future<bool> ft = pr.get_future();
+    if (ft.get()){
+        show(*vec);
+        vec->erase(vec->begin(), vec->end());
+    }
+    else {
+        std::cout << "-- Error!" << std::endl;
+    }
+}
+void run_tasks(){
+    auto* vector = new std::vector<int>;
+    for (int i = 0; i <= 10000; i++){
+        std::promise<bool> pr;
+        std::thread th_1(add_ell_, vector, i, std::ref(pr));
+        std::thread th_2(show_and_del_, vector, std::ref(pr));
+        th_1.join();
+        th_2.join();
+    }
+    std::cout << "-- Size of vector: " << vector->size() << std::endl;
+    delete vector;
+}
+// Работа promise
 
+
+using namespace std;
 int main() {
-    run_vector();
-    system("pause");
+    run_tasks();
     return 0;
 }
